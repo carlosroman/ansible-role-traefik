@@ -3,6 +3,8 @@
 - name: Run setup tasks
   ansible.builtin.include_tasks: setup-{{ ansible_facts.os_family }}.yml
 
-- name: Task is running from within the role
-  ansible.builtin.debug:
-    msg: "This is a task from my_role."
+- name: Include Traefik installation tasks
+  ansible.builtin.import_tasks: install.yml
+
+- name: Include Traefik configuration tasks
+  ansible.builtin.import_tasks: configure.yml

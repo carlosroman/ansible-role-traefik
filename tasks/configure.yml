@@ -1,0 +1,26 @@
+#SPDX-License-Identifier: MIT-0
+---
+- name: Write Traefik static configuration
+  ansible.builtin.template:
+    src: traefik.yml.j2
+    dest: "{{ traefik_config_dir }}/traefik.yml"
+    owner: root
+    group: "{{ traefik_group }}"
+    mode: "0644"
+  notify: Restart Traefik
+
+- name: Install Traefik systemd unit
+  ansible.builtin.template:
+    src: traefik.service.j2
+    dest: "/etc/systemd/system/{{ traefik_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+    daemon_reload: true
+  notify: Restart Traefik
+
+- name: Enable and start Traefik
+  ansible.builtin.systemd_service:
+    name: "{{ traefik_service_name }}"
+    enabled: true
+    state: started

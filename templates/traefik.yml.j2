@@ -1,0 +1,23 @@
+#SPDX-License-Identifier: MIT-0
+# {{ ansible_managed }}
+# Traefik static configuration file.
+
+entryPoints:
+  web:
+    address: ":{{ traefik_http_port }}"
+{% if traefik_enable_https %}
+  websecure:
+    address: ":{{ traefik_https_port }}"
+{% endif %}
+{% if traefik_enable_dashboard %}
+  traefik:
+    address: ":{{ traefik_dashboard_port }}"
+
+api:
+  dashboard: true
+{% endif %}
+{% if traefik_config_extras %}
+
+# Extra configuration from the traefik_config_extras variable.
+{{ traefik_config_extras | to_nice_yaml | trim }}
+{% endif %}

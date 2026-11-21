@@ -1,0 +1,91 @@
+#SPDX-License-Identifier: MIT-0
+---
+- name: Create Traefik group
+  ansible.builtin.group:
+    name: "{{ traefik_group }}"
+    system: true
+    state: present
+
+- name: Create Traefik user
+  ansible.builtin.user:
+    name: "{{ traefik_user }}"
+    group: "{{ traefik_group }}"
+    home: "{{ traefik_config_dir }}"
+    shell: /usr/sbin/nologin
+    system: true
+    create_home: false
+    expires: -1
+
+- name: Create Traefik directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - path: "{{ traefik_config_dir }}"
+      owner: root
+      group: "{{ traefik_group }}"
+      mode: "0755"
+    - path: "{{ traefik_data_dir }}"
+      owner: "{{ traefik_user }}"
+      group: "{{ traefik_group }}"
+      mode: "0700"
+
+- name: Query GitHub for the latest Traefik release
+  ansible.builtin.uri:
+    url: "https://api.github.com/repos/{{ traefik_github_owner }}/{{ traefik_github_repo }}/releases/latest"
+    headers:
+      Accept: application/vnd.github+json
+  register: traefik_latest_release
+  changed_when: false
+  when: traefik_version | length == 0
+
+- name: Set Traefik release facts
+  ansible.builtin.set_fact:
+    traefik_release_tag: >-
+      {{ ('v' ~ traefik_version) if traefik_version is match('^[0-9]')
+         else (traefik_version if traefik_version | length > 0
+               else traefik_latest_release.json.tag_name) }}
+    traefik_releases_url: "https://github.com/{{ traefik_github_owner }}/{{ traefik_github_repo }}/releases/download"
+
+- name: Set Traefik archive and download facts
+  ansible.builtin.set_fact:
+    traefik_archive_name: "traefik_{{ traefik_release_tag }}_linux_{{ traefik_arch }}.tar.gz"
+    traefik_checksums_name: "traefik_{{ traefik_release_tag }}_checksums.txt"
+    traefik_archive_url: "{{ traefik_releases_url }}/{{ traefik_archive_name }}"
+    traefik_checksums_url: "{{ traefik_releases_url }}/{{ traefik_checksums_name }}"
+
+- name: Download Traefik checksums file
+  ansible.builtin.get_url:
+    url: "{{ traefik_checksums_url }}"
+    dest: "/tmp/{{ traefik_checksums_name }}"
+    mode: "0644"
+
+- name: Read Traefik checksums file
+  ansible.builtin.slurp:
+    src: "/tmp/{{ traefik_checksums_name }}"
+  register: traefik_checksums_raw
+
+- name: Set Traefik binary checksum fact
+  ansible.builtin.set_fact:
+    traefik_binary_sha256: >-
+      {{ traefik_checksums_raw.content | b64decode
+         | regex_search('([a-f0-9]{64})[ \t]+' ~ traefik_archive_name, '\\1') | first }}
+
+- name: Download Traefik release archive
+  ansible.builtin.get_url:
+    url: "{{ traefik_archive_url }}"
+    dest: "/tmp/{{ traefik_archive_name }}"
+    checksum: "sha256:{{ traefik_binary_sha256 }}"
+    mode: "0644"
+
+- name: Extract Traefik binary
+  ansible.posix.unarchive:
+    remote_src: true
+    src: "/tmp/{{ traefik_archive_name }}"
+    dest: "{{ traefik_install_dir }}"
+    owner: root
+    group: root
+    mode: "0755"
