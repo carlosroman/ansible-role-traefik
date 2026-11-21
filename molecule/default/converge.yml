@@ -12,7 +12,7 @@
   roles:
     - role: carlosroman.traefik
       vars:
-        traefik_version: v3.7.19
+        traefik_version: v3.7.18
         traefik_enable_dashboard: true
 
   post_tasks:
@@ -75,7 +75,7 @@
     - name: Check Traefik version output
       ansible.builtin.assert:
         that:
-          - "'3.7.19' in (traefik_version_output.stdout ~ traefik_version_output.stderr)"
+          - "'3.7.18' in (traefik_version_output.stdout ~ traefik_version_output.stderr)"
         fail_msg: Traefik binary is not the expected version
 
     - name: Wait for the web entrypoint
