@@ -7,53 +7,6 @@ resolution-markers = [
 ]
 
 [[package]]
-name = "ansible-base-role"
-version = "0.1.0"
-source = { virtual = "." }
-dependencies = [
-    { name = "ansible-core" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "ansible-lint" },
-    { name = "docker" },
-    { name = "molecule" },
-    { name = "molecule-plugins" },
-    { name = "yamllint" },
-]
-lint = [
-    { name = "ansible-lint" },
-    { name = "yamllint" },
-]
-test = [
-    { name = "docker" },
-    { name = "molecule" },
-    { name = "molecule-plugins" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "ansible-core", specifier = ">=2.21" }]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "ansible-lint", specifier = ">=26.10" },
-    { name = "docker", specifier = ">=7.2" },
-    { name = "molecule", specifier = ">=26.10" },
-    { name = "molecule-plugins", specifier = ">=26.10" },
-    { name = "yamllint", specifier = ">=1.38" },
-]
-lint = [
-    { name = "ansible-lint", specifier = ">=26.10" },
-    { name = "yamllint", specifier = ">=1.38" },
-]
-test = [
-    { name = "docker", specifier = ">=7.2" },
-    { name = "molecule", specifier = ">=26.10" },
-    { name = "molecule-plugins", specifier = ">=26.10" },
-]
-
-[[package]]
 name = "ansible-compat"
 version = "26.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -110,6 +63,53 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/fe/55/94814bfe335b58e1f65c0b2e6c8d0676737eadd7cc1466d8fe7213345a13/ansible_lint-26.10.1.tar.gz", hash = "sha256:a746c6f3cb5719d1c202bc14e956ef3b0eca704025d1aa92707a27fc73ed73ea", size = 829069, upload-time = "2026-10-13T12:45:06.196Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f3/c7/80a6ac01d970257979f8f18e34e5a1a4c1ad356ea8507425fe74ea9178bc/ansible_lint-26.10.1-py3-none-any.whl", hash = "sha256:cc26d405ee38c3390e80ec18c4137b5685c36d03ce7d4d8233b0470d9a0e21e9", size = 342245, upload-time = "2026-10-13T12:45:04.243Z" },
+]
+
+[[package]]
+name = "ansible-role-traefik"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "ansible-core" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "ansible-lint" },
+    { name = "docker" },
+    { name = "molecule" },
+    { name = "molecule-plugins" },
+    { name = "yamllint" },
+]
+lint = [
+    { name = "ansible-lint" },
+    { name = "yamllint" },
+]
+test = [
+    { name = "docker" },
+    { name = "molecule" },
+    { name = "molecule-plugins" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "ansible-core", specifier = ">=2.21" }]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "ansible-lint", specifier = ">=26.10" },
+    { name = "docker", specifier = ">=7.2" },
+    { name = "molecule", specifier = ">=26.10" },
+    { name = "molecule-plugins", specifier = ">=26.10" },
+    { name = "yamllint", specifier = ">=1.38" },
+]
+lint = [
+    { name = "ansible-lint", specifier = ">=26.10" },
+    { name = "yamllint", specifier = ">=1.38" },
+]
+test = [
+    { name = "docker", specifier = ">=7.2" },
+    { name = "molecule", specifier = ">=26.10" },
+    { name = "molecule-plugins", specifier = ">=26.10" },
 ]
 
 [[package]]

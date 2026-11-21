@@ -50,12 +50,15 @@
                else traefik_latest_release.json.tag_name) }}
     traefik_releases_url: "https://github.com/{{ traefik_github_owner }}/{{ traefik_github_repo }}/releases/download"
 
-- name: Set Traefik archive and download facts
+- name: Set Traefik archive file name facts
   ansible.builtin.set_fact:
     traefik_archive_name: "traefik_{{ traefik_release_tag }}_linux_{{ traefik_arch }}.tar.gz"
     traefik_checksums_name: "traefik_{{ traefik_release_tag }}_checksums.txt"
-    traefik_archive_url: "{{ traefik_releases_url }}/{{ traefik_archive_name }}"
-    traefik_checksums_url: "{{ traefik_releases_url }}/{{ traefik_checksums_name }}"
+
+- name: Set Traefik download URL facts
+  ansible.builtin.set_fact:
+    traefik_archive_url: "{{ traefik_releases_url }}/{{ traefik_release_tag }}/{{ traefik_archive_name }}"
+    traefik_checksums_url: "{{ traefik_releases_url }}/{{ traefik_release_tag }}/{{ traefik_checksums_name }}"
 
 - name: Download Traefik checksums file
   ansible.builtin.get_url:
@@ -72,7 +75,7 @@
   ansible.builtin.set_fact:
     traefik_binary_sha256: >-
       {{ traefik_checksums_raw.content | b64decode
-         | regex_search('([a-f0-9]{64})[ \t]+' ~ traefik_archive_name, '\\1') | first }}
+         | regex_search('([a-f0-9]{64})\s+' ~ traefik_archive_name, '\1') | first }}
 
 - name: Download Traefik release archive
   ansible.builtin.get_url:
@@ -82,7 +85,7 @@
     mode: "0644"
 
 - name: Extract Traefik binary
-  ansible.posix.unarchive:
+  ansible.builtin.unarchive:
     remote_src: true
     src: "/tmp/{{ traefik_archive_name }}"
     dest: "{{ traefik_install_dir }}"

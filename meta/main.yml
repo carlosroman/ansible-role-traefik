@@ -9,7 +9,7 @@ galaxy_info:
 
   license: license (MIT)
 
-  min_ansible_version: 2.10
+  min_ansible_version: "2.21"
 
   galaxy_tags:
     - traefik
@@ -18,8 +18,5 @@ galaxy_info:
     - loadbalancer
     - http
     - https
-
-collections:
-  - name: ansible.posix
 
 dependencies: []

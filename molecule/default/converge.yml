@@ -60,7 +60,7 @@
     - name: Assert Traefik service is enabled and active
       ansible.builtin.assert:
         that:
-          - traefik_service.enabled
+          - traefik_service.status.UnitFileState == "enabled"
           - traefik_service.status.ActiveState == "active"
         fail_msg: Traefik service is not enabled or not active
 
@@ -75,7 +75,7 @@
     - name: Check Traefik version output
       ansible.builtin.assert:
         that:
-          - "'v3.7.19' in traefik_version_output.stdout"
+          - "'3.7.19' in (traefik_version_output.stdout ~ traefik_version_output.stderr)"
         fail_msg: Traefik binary is not the expected version
 
     - name: Wait for the web entrypoint

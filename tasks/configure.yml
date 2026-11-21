@@ -16,7 +16,6 @@
     owner: root
     group: root
     mode: "0644"
-    daemon_reload: true
   notify: Restart Traefik
 
 - name: Enable and start Traefik
@@ -24,3 +23,4 @@
     name: "{{ traefik_service_name }}"
     enabled: true
     state: started
+    daemon_reload: true
