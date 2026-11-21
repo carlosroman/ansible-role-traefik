@@ -1,0 +1,25 @@
+#SPDX-License-Identifier: MIT-0
+---
+- name: Converge (latest via GitHub API)
+  hosts: all
+
+  roles:
+    - role: carlosroman.traefik
+
+  post_tasks:
+    - name: Check Traefik service state
+      ansible.builtin.systemd_service:
+        name: traefik
+      register: traefik_service
+      changed_when: false
+
+    - name: Assert Traefik is installed from the latest release
+      ansible.builtin.assert:
+        that:
+          - traefik_service.status.UnitFileState == "enabled"
+          - traefik_service.status.ActiveState == "active"
+          - traefik_release_tag is match('^v[0-9]+\\.[0-9]+\\.[0-9]+$')
+          - traefik_binary_sha256 is match('^[a-f0-9]{64}$')
+        fail_msg: >-
+          Latest resolution failed (tag={{ traefik_release_tag }},
+          sha={{ traefik_binary_sha256 }})
