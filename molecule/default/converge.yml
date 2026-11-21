@@ -10,9 +10,80 @@
       when: ansible_facts['os_family'] == 'Debian'
 
   roles:
-    - role: carlosroman.base_role
+    - role: carlosroman.traefik
+      vars:
+        traefik_version: v3.7.19
+        traefik_enable_dashboard: true
 
   post_tasks:
-    - name: Verify
-      ansible.builtin.debug:
-        msg: "Add your verification tasks here."
+    - name: Check Traefik systemd unit file exists
+      ansible.builtin.stat:
+        path: /etc/systemd/system/traefik.service
+      register: traefik_unit_file
+
+    - name: Assert Traefik systemd unit file is installed
+      ansible.builtin.assert:
+        that:
+          - traefik_unit_file.stat.exists
+          - traefik_unit_file.stat.isreg
+        fail_msg: Traefik systemd unit file is missing
+
+    - name: Check Traefik static configuration file exists
+      ansible.builtin.stat:
+        path: /etc/traefik/traefik.yml
+      register: traefik_config_file
+
+    - name: Assert Traefik static configuration file is installed
+      ansible.builtin.assert:
+        that:
+          - traefik_config_file.stat.exists
+        fail_msg: Traefik static configuration file is missing
+
+    - name: Check Traefik binary is installed
+      ansible.builtin.stat:
+        path: /usr/local/bin/traefik
+      register: traefik_binary_file
+
+    - name: Assert Traefik binary is installed
+      ansible.builtin.assert:
+        that:
+          - traefik_binary_file.stat.exists
+          - traefik_binary_file.stat.mode == "0755"
+        fail_msg: Traefik binary is missing or not executable
+
+    - name: Gather Traefik service state
+      ansible.builtin.systemd_service:
+        name: traefik
+      register: traefik_service
+      changed_when: false
+
+    - name: Assert Traefik service is enabled and active
+      ansible.builtin.assert:
+        that:
+          - traefik_service.enabled
+          - traefik_service.status.ActiveState == "active"
+        fail_msg: Traefik service is not enabled or not active
+
+    - name: Assert Traefik version matches the pinned version
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/traefik
+          - version
+      register: traefik_version_output
+      changed_when: false
+
+    - name: Check Traefik version output
+      ansible.builtin.assert:
+        that:
+          - "'v3.7.19' in traefik_version_output.stdout"
+        fail_msg: Traefik binary is not the expected version
+
+    - name: Wait for the web entrypoint
+      ansible.builtin.wait_for:
+        port: 80
+        timeout: 30
+
+    - name: Wait for the dashboard entrypoint
+      ansible.builtin.wait_for:
+        port: 8080
+        timeout: 30
