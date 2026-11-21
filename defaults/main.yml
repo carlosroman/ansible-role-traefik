@@ -1,3 +1,44 @@
 #SPDX-License-Identifier: MIT-0
 ---
-# defaults file for role
+# Traefik version to install (e.g. "v3.7.19" or "3.7.19").
+# Leave empty to install the latest release, resolved via the GitHub API.
+traefik_version: ""
+
+# GitHub location of the published Traefik release binaries.
+traefik_github_owner: traefik
+traefik_github_repo: traefik
+
+# Directory the traefik binary is installed into.
+traefik_install_dir: /usr/local/bin
+
+# Directory holding the static configuration file (traefik.yml).
+traefik_config_dir: /etc/traefik
+
+# Writable directory for Traefik data such as acme.json.
+traefik_data_dir: /var/lib/traefik
+
+# Service user and group Traefik runs as.
+traefik_user: traefik
+traefik_group: traefik
+
+# Name of the systemd service managed by this role.
+traefik_service_name: traefik
+
+# Port of the "web" (HTTP) entrypoint.
+traefik_http_port: 80
+
+# Enable the "websecure" (HTTPS) entrypoint.
+traefik_enable_https: false
+
+# Port of the "websecure" (HTTPS) entrypoint.
+traefik_https_port: 443
+
+# Enable the "traefik" entrypoint exposing the dashboard and API.
+traefik_enable_dashboard: false
+
+# Port of the "traefik" (dashboard/API) entrypoint.
+traefik_dashboard_port: 8080
+
+# Extra top-level options merged into the static configuration file.
+# Given as a YAML dict, e.g. { log: { level: DEBUG } }.
+traefik_config_extras: {}
