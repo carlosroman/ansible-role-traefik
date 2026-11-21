@@ -1,4 +1,7 @@
+---
 #SPDX-License-Identifier: MIT-0
+name: conventional-commits
+description: Use when asked to commit changes or write a commit message. Generates Conventional Commits messages (type, scope from changed files, imperative description) for this Ansible role repository.
 ---
 
 # Skill: Conventional Commits
