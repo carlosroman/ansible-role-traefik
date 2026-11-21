@@ -10,6 +10,10 @@ setup :
 test :
 	@(${MOLECULE_TEST})
 
+.PHONY : test/latest
+test/latest :
+	@(MOLECULE_PLAYBOOK=converge-latest.yml ${MOLECULE_TEST})
+
 .PHONY : test/ubuntu-2604
 test/ubuntu-2604 :
 	@(MOLECULE_DISTRO=ubuntu2604 ${MOLECULE_TEST})
