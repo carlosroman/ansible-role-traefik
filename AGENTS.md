@@ -14,6 +14,8 @@ All driven by `make`:
 |---|---|
 | `make lint` | Runs `yamllint .` |
 | `make test` | Runs `molecule test` (single distro, defaults to `ubuntu2404`) |
+| `make test/acme` | Tests the ACME resolver opt-in (`converge-acme.yml`) |
+| `make test/acme/ubuntu-2604` | That opt-in scenario against Ubuntu 26.04 |
 | `make test/ubuntu-2404` | Test against a specific distro |
 | `make test/all` | Test against all 7 distros sequentially |
 

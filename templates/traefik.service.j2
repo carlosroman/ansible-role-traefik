@@ -9,6 +9,14 @@ Wants=network-online.target
 Type=simple
 User={{ traefik_user }}
 Group={{ traefik_group }}
+{% set traefik_unit_env_file = traefik_env_file if traefik_env_file | length > 0
+   else ((traefik_config_dir ~ '/env') if traefik_acme_dns_provider | length > 0 else '') %}
+{% if traefik_unit_env_file %}
+# Credentials for ACME DNS providers (lego) and other secrets, kept out of the
+# static configuration file. The leading dash tolerates a missing file, which
+# the consuming playbook or vault creates out-of-band.
+EnvironmentFile=-{{ traefik_unit_env_file }}
+{% endif %}
 ExecStart={{ traefik_install_dir }}/traefik --configFile={{ traefik_config_dir }}/traefik.yml
 Restart=on-failure
 RestartSec=5s

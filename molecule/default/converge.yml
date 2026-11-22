@@ -87,3 +87,41 @@
       ansible.builtin.wait_for:
         port: 8080
         timeout: 30
+
+    - name: Read the static configuration file
+      ansible.builtin.slurp:
+        src: /etc/traefik/traefik.yml
+      register: default_config_content
+
+    - name: Assert the default render touches no optional sections
+      ansible.builtin.assert:
+        that:
+          - "'certificatesResolvers' not in rendered_config"
+          - "'acme' not in rendered_config"
+        fail_msg: The default converge rendered ACME configuration
+      vars:
+        rendered_config: "{{ default_config_content.content | b64decode }}"
+
+    - name: Read the systemd unit file
+      ansible.builtin.slurp:
+        src: /etc/systemd/system/traefik.service
+      register: default_unit_content
+
+    - name: Assert the default unit has no EnvironmentFile line
+      ansible.builtin.assert:
+        that:
+          - "'EnvironmentFile' not in unit_text"
+        fail_msg: The default unit references an environment file
+      vars:
+        unit_text: "{{ default_unit_content.content | b64decode }}"
+
+    - name: Check for an ACME storage file
+      ansible.builtin.stat:
+        path: /var/lib/traefik/acme.json
+      register: default_acme_stat
+
+    - name: Assert the default converge created no ACME storage file
+      ansible.builtin.assert:
+        that:
+          - not default_acme_stat.stat.exists
+        fail_msg: The default converge created acme.json

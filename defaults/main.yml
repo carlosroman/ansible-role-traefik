@@ -39,6 +39,50 @@ traefik_enable_dashboard: false
 # Port of the "traefik" (dashboard/API) entrypoint.
 traefik_dashboard_port: 8080
 
+# ACME certificate resolver (all opt-ins). Rendering of a
+# certificatesResolvers section is gated on this email address: while it is
+# empty the static configuration is exactly what this role wrote before ACME
+# support existed. Routers reference the rendered resolver as
+# certResolver: letsencrypt.
+traefik_acme_email: ""
+
+# ACME CA directory URL. The default is the Let's Encrypt production endpoint;
+# https://acme-staging-v02.api.letsencrypt.org/directory is the staging
+# endpoint, meant for proving issuance and renewal without burning through
+# production rate limits.
+traefik_acme_ca_server: "https://acme-v02.api.letsencrypt.org/directory"
+
+# LEGO account/certificate store for the resolver. The role creates the file
+# 0600 owned by the service user before the first start; it holds private
+# keys and must never be world-readable.
+traefik_acme_storage: "{{ traefik_data_dir }}/acme.json"
+
+# DNS-01 challenge provider for the resolver (e.g. route53). Empty means the
+# resolver falls back to Traefik's default HTTP-01 challenge. Credentials are
+# NOT configured here: lego reads them from the environment file, so no secret
+# ever lands in the world-readable static configuration.
+traefik_acme_dns_provider: ""
+
+# Wait before Traefik checks DNS propagation, as a Go duration string
+# (e.g. "30s"). Empty uses the Traefik default of no delay; lego still runs
+# its own provider-managed propagation wait afterwards.
+traefik_acme_dns_delay: ""
+
+# Custom DNS servers (host:port) used for the propagation check, e.g. the
+# authoritative servers of the delegated zone.
+traefik_acme_dns_resolvers: []
+
+# Skip the DNS propagation check entirely (lego's own timeout applies).
+traefik_acme_dns_disable_propagation_check: false
+
+# Optional environment file sourced by the systemd unit. While it is empty
+# the unit gets no EnvironmentFile line, except that a configured
+# traefik_acme_dns_provider defaults this to <traefik_config_dir>/env so lego
+# can read provider credentials (e.g. AWS_ACCESS_KEY_ID,
+# AWS_SECRET_ACCESS_KEY, AWS_REGION for route53). The file itself is managed
+# out-of-band (vault, consuming playbook), never by this role.
+traefik_env_file: ""
+
 # Extra top-level options merged into the static configuration file.
 # Given as a YAML dict, e.g. { log: { level: DEBUG } }.
 traefik_config_extras: {}

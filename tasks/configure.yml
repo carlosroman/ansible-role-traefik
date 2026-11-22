@@ -18,6 +18,34 @@
     mode: "0644"
   notify: Restart Traefik
 
+- name: Look for the ACME storage file
+  ansible.builtin.stat:
+    path: "{{ traefik_acme_storage }}"
+  register: traefik_acme_storage_stat
+  when: traefik_acme_email | length > 0
+
+- name: Create the ACME storage file readable only by Traefik
+  ansible.builtin.file:
+    path: "{{ traefik_acme_storage }}"
+    state: touch
+    owner: "{{ traefik_user }}"
+    group: "{{ traefik_group }}"
+    mode: "0600"
+  when:
+    - traefik_acme_email | length > 0
+    - not traefik_acme_storage_stat.stat.exists
+
+- name: Keep the ACME storage file readable only by Traefik
+  ansible.builtin.file:
+    path: "{{ traefik_acme_storage }}"
+    state: file
+    owner: "{{ traefik_user }}"
+    group: "{{ traefik_group }}"
+    mode: "0600"
+  when:
+    - traefik_acme_email | length > 0
+    - traefik_acme_storage_stat.stat.exists
+
 - name: Enable and start Traefik
   ansible.builtin.systemd_service:
     name: "{{ traefik_service_name }}"

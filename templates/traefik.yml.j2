@@ -16,6 +16,33 @@ entryPoints:
 api:
   dashboard: true
 {% endif %}
+{% if traefik_acme_email %}
+
+# ACME certificate resolver from the traefik_acme_* variables. Routers
+# reference it as certResolver: letsencrypt.
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: "{{ traefik_acme_email }}"
+      caServer: "{{ traefik_acme_ca_server }}"
+      storage: "{{ traefik_acme_storage }}"
+{% if traefik_acme_dns_provider %}
+      dnsChallenge:
+        provider: {{ traefik_acme_dns_provider }}
+{% if traefik_acme_dns_delay %}
+        delayBeforeCheck: {{ traefik_acme_dns_delay }}
+{% endif %}
+{% if traefik_acme_dns_resolvers %}
+        resolvers:
+{% for resolver in traefik_acme_dns_resolvers %}
+          - "{{ resolver }}"
+{% endfor %}
+{% endif %}
+{% if traefik_acme_dns_disable_propagation_check %}
+        disablePropagationCheck: true
+{% endif %}
+{% endif %}
+{% endif %}
 {% if traefik_config_extras %}
 
 # Extra configuration from the traefik_config_extras variable.

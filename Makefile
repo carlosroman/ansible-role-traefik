@@ -14,6 +14,15 @@ test :
 test/latest :
 	@(MOLECULE_PLAYBOOK=converge-latest.yml ${MOLECULE_TEST})
 
+# ACME resolver opt-in variant (molecule/default/converge-acme.yml).
+.PHONY : test/acme
+test/acme :
+	@(MOLECULE_PLAYBOOK=converge-acme.yml ${MOLECULE_TEST})
+
+.PHONY : test/acme/ubuntu-2604
+test/acme/ubuntu-2604 :
+	@(MOLECULE_DISTRO=ubuntu2604 MOLECULE_PLAYBOOK=converge-acme.yml ${MOLECULE_TEST})
+
 .PHONY : test/ubuntu-2604
 test/ubuntu-2604 :
 	@(MOLECULE_DISTRO=ubuntu2604 ${MOLECULE_TEST})

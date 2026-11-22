@@ -1,0 +1,140 @@
+#SPDX-License-Identifier: MIT-0
+---
+# Converge playbook variant that exercises the ACME resolver opt-ins and the
+# systemd EnvironmentFile wiring. Run with: make test/acme
+#
+# The Route 53 credentials are deliberately fake. Traefik has to start anyway
+# and keep serving its plain entry points while certificate issuance fails: a
+# host whose credentials expire or were never installed must not lose its
+# proxy.
+- name: Converge (ACME resolver opt-in)
+  hosts: all
+
+  pre_tasks:
+    - name: Update apt cache.
+      apt: update_cache=true cache_valid_time=600
+      changed_when: false
+      when: ansible_facts['os_family'] == 'Debian'
+
+    - name: Create the Traefik configuration directory
+      # Just so the environment file has a home before the role runs; the
+      # role owns this directory's final ownership (root:traefik) and must
+      # not fight the pre-task over it.
+      ansible.builtin.file:
+        path: /etc/traefik
+        state: directory
+        mode: "0755"
+
+    - name: Write the environment file with fake Route 53 credentials
+      ansible.builtin.copy:
+        content: |
+          # Molecule stand-in for the credentials a consuming playbook places
+          # here; these are the canonical documentation examples, never real.
+          AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
+          AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
+          AWS_REGION=us-east-1
+        dest: /etc/traefik/env
+        owner: root
+        group: root
+        mode: "0600"
+
+  roles:
+    - role: carlosroman.traefik
+      vars:
+        traefik_version: v3.7.18
+        traefik_enable_https: true
+        traefik_acme_email: molecule@example.invalid
+        traefik_acme_ca_server: "https://acme-staging-v02.api.letsencrypt.org/directory"
+        traefik_acme_dns_provider: route53
+        traefik_acme_dns_delay: 10s
+
+  post_tasks:
+    - name: Read the static configuration file
+      ansible.builtin.slurp:
+        src: /etc/traefik/traefik.yml
+      register: acme_config_content
+
+    - name: Assert the resolver block was rendered
+      ansible.builtin.assert:
+        that:
+          - item in static_config
+        fail_msg: "{{ item }} is missing from the static configuration"
+      loop:
+        - "certificatesResolvers:"
+        - 'email: "molecule@example.invalid"'
+        - 'caServer: "https://acme-staging-v02.api.letsencrypt.org/directory"'
+        - 'storage: "/var/lib/traefik/acme.json"'
+        - "dnsChallenge:"
+        - "provider: route53"
+        - "delayBeforeCheck: 10s"
+      vars:
+        static_config: "{{ acme_config_content.content | b64decode }}"
+
+    - name: Read the systemd unit file
+      ansible.builtin.slurp:
+        src: /etc/systemd/system/traefik.service
+      register: acme_unit_content
+
+    - name: Assert the unit sources the canonical environment file
+      ansible.builtin.assert:
+        that:
+          - "'EnvironmentFile=-/etc/traefik/env' in unit_text"
+        fail_msg: The unit does not source /etc/traefik/env
+      vars:
+        unit_text: "{{ acme_unit_content.content | b64decode }}"
+
+    - name: Check the ACME storage file
+      ansible.builtin.stat:
+        path: /var/lib/traefik/acme.json
+      register: acme_storage_stat
+
+    - name: Assert the ACME storage file is private to Traefik
+      ansible.builtin.assert:
+        that:
+          - acme_storage_stat.stat.exists
+          - acme_storage_stat.stat.mode == '0600'
+          - acme_storage_stat.stat.pw_name == 'traefik'
+        fail_msg: "acme.json is not private to Traefik: {{ acme_storage_stat.stat | default({}) }}"
+
+    - name: Read the Traefik process environment
+      ansible.builtin.shell: |
+        pid="$(systemctl show -p MainPID --value traefik)"
+        tr '\0' '\n' < "/proc/${pid}/environ"
+      changed_when: false
+      register: traefik_process_env
+
+    - name: Assert the unit picked up the environment file
+      ansible.builtin.assert:
+        that:
+          - "'AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE' in traefik_process_env.stdout_lines"
+        fail_msg: The running Traefik process did not read the environment file
+
+    - name: Wait for the web entrypoint
+      ansible.builtin.wait_for:
+        port: 80
+        timeout: 30
+
+    - name: Wait for the websecure entrypoint
+      ansible.builtin.wait_for:
+        port: 443
+        timeout: 30
+
+    # DNS-01 issuance with the fake credentials fails asynchronously; give it
+    # a moment to fail, then require the proxy to still be up. A certificate
+    # error must degrade to a log line, never to a stopped service.
+    - name: Let the first ACME issuance attempt fail
+      ansible.builtin.wait_for:
+        timeout: 15
+      changed_when: false
+
+    - name: Gather Traefik service state
+      ansible.builtin.systemd_service:
+        name: traefik
+      register: acme_traefik_service
+      changed_when: false
+
+    - name: Assert Traefik survives failing certificate issuance
+      ansible.builtin.assert:
+        that:
+          - acme_traefik_service.status.ActiveState == "active"
+        fail_msg: Failing DNS-01 issuance stopped the Traefik service
