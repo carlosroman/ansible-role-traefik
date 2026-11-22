@@ -43,6 +43,9 @@ Available variables are listed below, along with their default values (see `defa
 | `traefik_acme_dns_resolvers` | `[]` | Custom DNS servers (`host:port`) used for the propagation check. |
 | `traefik_acme_dns_disable_propagation_check` | `false` | Skip the DNS propagation check (lego's own timeout still applies). |
 | `traefik_env_file` | `""` | Environment file sourced by the systemd unit. Empty means no `EnvironmentFile` line, except that a configured `traefik_acme_dns_provider` defaults it to `{{ traefik_config_dir }}/env`. |
+| `traefik_enable_file_provider` | `false` | Opt-in for Traefik's file provider: renders a watched `providers.file` section and deploys dynamic fragments. |
+| `traefik_dynamic_config_dir` | `/etc/traefik/dynamic` | Watched directory for the fragments (deployed `0750`, group-readable by `traefik_group`; fragments are `0640`). |
+| `traefik_dynamic_configs` | `{}` | Dict of fragment file name to Traefik dynamic configuration structure; rendered as YAML, and names dropped from the dict are deleted from the directory. |
 | `traefik_config_extras` | `{}` | Extra YAML structure merged into the static configuration file (top-level Traefik options). |
 
 ## Dependencies
@@ -105,6 +108,56 @@ Failing to issue (bad credentials, unreachable CA) is a logged error, not a
 stopped proxy: Traefik keeps serving the entry points that do not need the
 missing certificate. `make test/acme` covers the rendering, the unit wiring,
 the `acme.json` permissions and that survival.
+
+Dynamic routers (file provider)
+-------------------------------
+
+Routers and services belong to Traefik's *dynamic* configuration. Set
+`traefik_enable_file_provider: true` and the role renders a watched
+`providers.file` section pointing at `traefik_dynamic_config_dir` (deployed
+`0750`, group-readable by the service group) and deploys each entry of
+`traefik_dynamic_configs` — a dict of fragment file name to the dynamic
+configuration structure itself — as YAML into that directory. Names removed
+from the dict are deleted again, so a router retired in inventory disappears
+on the next converge.
+
+    - hosts: servers
+      roles:
+        - role: carlosroman.traefik
+          vars:
+            traefik_enable_https: true
+            traefik_acme_email: certs@example.com
+            traefik_acme_dns_provider: route53
+            traefik_enable_file_provider: true
+            traefik_dynamic_configs:
+              jellyfin.yml:
+                http:
+                  routers:
+                    jellyfin:
+                      rule: "Host(`media.example.com`)"
+                      entryPoints:
+                        - websecure
+                      service: jellyfin
+                      tls:
+                        certResolver: letsencrypt
+                  services:
+                    jellyfin:
+                      loadBalancer:
+                        servers:
+                          - url: http://127.0.0.1:8096
+
+Traefik v2 removed v1's `traefik validate` command, so the role pre-activates
+with a startup probe instead: after every configuration change it boots
+copies of the rendered files — every entry point on an ephemeral port, a
+throwaway ACME store, so the probe can never disturb the running service or
+its keys — for a few seconds, and treats anything the real binary logs as an
+error (unknown fields, dangling service references, a router naming a
+certificate resolver that does not exist) as a failed change. The play fails
+before the restart handler runs, so a rejected configuration never
+activates. As belt-and-braces the file provider itself is fail-safe: a
+malformed fragment appearing later is rejected in favour of the last good
+configuration. `make test/acme` asserts the fragments deploy, the routers
+actually serve, and the probe rejects a bad fragment.
 
 ## License
 

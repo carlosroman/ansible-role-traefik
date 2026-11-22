@@ -98,7 +98,8 @@
         that:
           - "'certificatesResolvers' not in rendered_config"
           - "'acme' not in rendered_config"
-        fail_msg: The default converge rendered ACME configuration
+          - "'providers' not in rendered_config"
+        fail_msg: The default converge rendered optional configuration
       vars:
         rendered_config: "{{ default_config_content.content | b64decode }}"
 
@@ -125,3 +126,14 @@
         that:
           - not default_acme_stat.stat.exists
         fail_msg: The default converge created acme.json
+
+    - name: Check for the dynamic configuration directory
+      ansible.builtin.stat:
+        path: /etc/traefik/dynamic
+      register: default_dynamic_stat
+
+    - name: Assert the default converge created no dynamic configuration
+      ansible.builtin.assert:
+        that:
+          - not default_dynamic_stat.stat.exists
+        fail_msg: The default converge created the file provider directory

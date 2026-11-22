@@ -1,13 +1,14 @@
 #SPDX-License-Identifier: MIT-0
 ---
-# Converge playbook variant that exercises the ACME resolver opt-ins and the
-# systemd EnvironmentFile wiring. Run with: make test/acme
+# Converge playbook variant that exercises the ACME resolver opt-ins, the
+# systemd EnvironmentFile wiring and the dynamic file provider. Run with:
+# make test/acme
 #
 # The Route 53 credentials are deliberately fake. Traefik has to start anyway
 # and keep serving its plain entry points while certificate issuance fails: a
 # host whose credentials expire or were never installed must not lose its
 # proxy.
-- name: Converge (ACME resolver opt-in)
+- name: Converge (ACME and file provider opt-ins)
   hosts: all
 
   pre_tasks:
@@ -43,10 +44,28 @@
       vars:
         traefik_version: v3.7.18
         traefik_enable_https: true
+        traefik_enable_dashboard: true
         traefik_acme_email: molecule@example.invalid
         traefik_acme_ca_server: "https://acme-staging-v02.api.letsencrypt.org/directory"
         traefik_acme_dns_provider: route53
         traefik_acme_dns_delay: 10s
+        traefik_enable_file_provider: true
+        traefik_dynamic_configs:
+          sample.yml:
+            http:
+              routers:
+                api:
+                  rule: "PathPrefix(`/api`)"
+                  entryPoints:
+                    - web
+                  service: api@internal
+                secure:
+                  rule: "Host(`secure.molecule.example.invalid`)"
+                  entryPoints:
+                    - websecure
+                  service: api@internal
+                  tls:
+                    certResolver: letsencrypt
 
   post_tasks:
     - name: Read the static configuration file
@@ -109,6 +128,47 @@
           - "'AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE' in traefik_process_env.stdout_lines"
         fail_msg: The running Traefik process did not read the environment file
 
+    - name: Assert the file provider block was rendered
+      ansible.builtin.assert:
+        that:
+          - item in static_config
+        fail_msg: "{{ item }} is missing from the static configuration"
+      loop:
+        - "providers:"
+        - 'directory: "/etc/traefik/dynamic"'
+        - "watch: true"
+      vars:
+        static_config: "{{ acme_config_content.content | b64decode }}"
+
+    - name: Check the dynamic configuration directory
+      ansible.builtin.stat:
+        path: /etc/traefik/dynamic
+      register: dynamic_dir_stat
+
+    - name: Assert the fragment directory is readable by the Traefik group
+      ansible.builtin.assert:
+        that:
+          - dynamic_dir_stat.stat.exists
+          - dynamic_dir_stat.stat.mode == '0750'
+          - dynamic_dir_stat.stat.pw_name == 'root'
+          - dynamic_dir_stat.stat.gr_name == 'traefik'
+        fail_msg: "unexpected dynamic directory: {{ dynamic_dir_stat.stat | default({}) }}"
+
+    - name: Read the deployed fragment
+      ansible.builtin.slurp:
+        src: /etc/traefik/dynamic/sample.yml
+      register: dynamic_fragment
+
+    - name: Assert the fragment holds the rendered routers
+      ansible.builtin.assert:
+        that:
+          - "'api@internal' in fragment"
+          - "'certResolver: letsencrypt' in fragment"
+          - "'secure.molecule.example.invalid' in fragment"
+        fail_msg: "deployed fragment is wrong: {{ fragment }}"
+      vars:
+        fragment: "{{ dynamic_fragment.content | b64decode }}"
+
     - name: Wait for the web entrypoint
       ansible.builtin.wait_for:
         port: 80
@@ -118,6 +178,124 @@
       ansible.builtin.wait_for:
         port: 443
         timeout: 30
+
+    - name: Confirm the file-provider router serves through the web entrypoint
+      ansible.builtin.uri:
+        url: http://127.0.0.1/api/overview
+      register: dynamic_probe
+      until: dynamic_probe.status == 200
+      retries: 15
+      delay: 2
+      changed_when: false
+
+    - name: Query the live routers from the API
+      ansible.builtin.uri:
+        url: http://127.0.0.1/api/http/routers
+      register: live_routers
+      changed_when: false
+
+    - name: Assert Traefik loaded both file-provider routers
+      ansible.builtin.assert:
+        that:
+          - "'api@file' in router_names"
+          - "'secure@file' in router_names"
+        fail_msg: "routers from sample.yml did not load: {{ router_names }}"
+      vars:
+        router_names: "{{ live_routers.json | map(attribute='name') | list }}"
+
+    # The secure router's certificate cannot be issued without valid Route 53
+    # credentials, so Traefik falls back to its default certificate; the
+    # router itself must still be listening on websecure and routing.
+    - name: Confirm the TLS router routes on websecure despite failed issuance
+      ansible.builtin.uri:
+        url: https://127.0.0.1/api/overview
+        headers:
+          Host: secure.molecule.example.invalid
+        validate_certs: false
+      register: tls_probe
+      until: tls_probe.status == 200
+      retries: 15
+      delay: 2
+      changed_when: false
+
+    # The startup probe below mirrors the role's validation gate (the same
+    # boot copies the gate used, replayed against the live fragment
+    # directory). A fragment Traefik rejects must fail the check while the
+    # proxy keeps serving the last good configuration; that is the guarantee
+    # a bad router never activates.
+    - name: Drop a fragment Traefik must reject
+      ansible.builtin.copy:
+        content: |
+          http:
+            routers:
+              broken:
+                rule: "Host(`broken.molecule.example.invalid`)"
+                bogusField: 42
+        dest: /etc/traefik/dynamic/broken.yml
+        owner: root
+        group: traefik
+        mode: "0640"
+      # The probe scenario, not configuration state: the fragment is removed
+      # again below, so idempotence must not count it.
+      changed_when: false
+
+    - name: Check the startup probe rejects the bad fragment
+      ansible.builtin.shell: |
+        set -u
+        log="$(mktemp)"
+        timeout -s KILL 8 /usr/local/bin/traefik \
+          --configFile=/tmp/traefik-role-check-dynamic.yml >"$log" 2>&1
+        rc=$?
+        if [ "$rc" -ne 124 ] && [ "$rc" -ne 137 ]; then
+          grep -qi 'address already in use' "$log" || { cat "$log"; rm -f "$log"; exit 1; }
+        fi
+        allow='Router uses a nonexistent certificate resolver certificateResolver=letsencrypt( |$)|address already in use'
+        bad="$(sed -e 's/\x1b\[[0-9;]*m//g' "$log" | grep -E 'ERR|level":"error' | grep -vE "$allow" || true)"
+        rm -f "$log"
+        if [ -n "$bad" ]; then
+          echo "$bad"
+          exit 1
+        fi
+      changed_when: false
+      failed_when: probe_reject.rc == 0
+      register: probe_reject
+
+    - name: Confirm the proxy still serves the last good configuration
+      ansible.builtin.uri:
+        url: http://127.0.0.1/api/overview
+      register: still_serving
+      changed_when: false
+
+    - name: Assert the running proxy ignored the bad fragment
+      ansible.builtin.assert:
+        that:
+          - still_serving.status == 200
+        fail_msg: The bad fragment took the running proxy down
+
+    - name: Remove the bad fragment
+      ansible.builtin.file:
+        path: /etc/traefik/dynamic/broken.yml
+        state: absent
+      changed_when: false
+
+    - name: Check the startup probe passes again
+      ansible.builtin.shell: |
+        set -u
+        log="$(mktemp)"
+        timeout -s KILL 8 /usr/local/bin/traefik \
+          --configFile=/tmp/traefik-role-check-dynamic.yml >"$log" 2>&1
+        rc=$?
+        if [ "$rc" -ne 124 ] && [ "$rc" -ne 137 ]; then
+          grep -qi 'address already in use' "$log" || { cat "$log"; rm -f "$log"; exit 1; }
+        fi
+        allow='Router uses a nonexistent certificate resolver certificateResolver=letsencrypt( |$)|address already in use'
+        bad="$(sed -e 's/\x1b\[[0-9;]*m//g' "$log" | grep -E 'ERR|level":"error' | grep -vE "$allow" || true)"
+        rm -f "$log"
+        if [ -n "$bad" ]; then
+          echo "$bad"
+          exit 1
+        fi
+      changed_when: false
 
     # DNS-01 issuance with the fake credentials fails asynchronously; give it
     # a moment to fail, then require the proxy to still be up. A certificate

@@ -43,6 +43,14 @@ certificatesResolvers:
 {% endif %}
 {% endif %}
 {% endif %}
+{% if traefik_enable_file_provider %}
+
+# Watched directory of dynamic fragments rendered from traefik_dynamic_configs.
+providers:
+  file:
+    directory: "{{ traefik_dynamic_config_dir }}"
+    watch: true
+{% endif %}
 {% if traefik_config_extras %}
 
 # Extra configuration from the traefik_config_extras variable.

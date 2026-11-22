@@ -83,6 +83,21 @@ traefik_acme_dns_disable_propagation_check: false
 # out-of-band (vault, consuming playbook), never by this role.
 traefik_env_file: ""
 
+# Opt-in for Traefik's file provider: renders providers.file (watched) into
+# the static configuration and deploys the dynamic fragments below. While it
+# is false nothing file-provider related is touched.
+traefik_enable_file_provider: false
+
+# Watched directory the dynamic fragments are deployed into (0750, readable
+# by the service group that runs Traefik).
+traefik_dynamic_config_dir: /etc/traefik/dynamic
+
+# Dynamic fragments as a dict of file name to Traefik dynamic configuration
+# structure, e.g. { jellyfin.yml: { http: { routers: ..., services: ... } } }.
+# Values are rendered as YAML; fragment names removed from the dict are
+# deleted from the directory.
+traefik_dynamic_configs: {}
+
 # Extra top-level options merged into the static configuration file.
 # Given as a YAML dict, e.g. { log: { level: DEBUG } }.
 traefik_config_extras: {}

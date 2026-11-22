@@ -1,5 +1,14 @@
 #SPDX-License-Identifier: MIT-0
 ---
+- name: Ensure the dynamic configuration directory exists
+  ansible.builtin.file:
+    path: "{{ traefik_dynamic_config_dir }}"
+    state: directory
+    owner: root
+    group: "{{ traefik_group }}"
+    mode: "0750"
+  when: traefik_enable_file_provider
+
 - name: Write Traefik static configuration
   ansible.builtin.template:
     src: traefik.yml.j2
@@ -8,15 +17,42 @@
     group: "{{ traefik_group }}"
     mode: "0644"
   notify: Restart Traefik
+  register: traefik_static_config
 
-- name: Install Traefik systemd unit
-  ansible.builtin.template:
-    src: traefik.service.j2
-    dest: "/etc/systemd/system/{{ traefik_service_name }}.service"
+- name: Deploy dynamic configuration fragments
+  ansible.builtin.copy:
+    content: "{{ item.value | to_nice_yaml }}"
+    dest: "{{ traefik_dynamic_config_dir }}/{{ item.key }}"
     owner: root
-    group: root
-    mode: "0644"
+    group: "{{ traefik_group }}"
+    mode: "0640"
+  loop: "{{ traefik_dynamic_configs | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
   notify: Restart Traefik
+  register: traefik_fragment_files
+  when: traefik_enable_file_provider
+
+- name: Look for retired dynamic configuration fragments
+  ansible.builtin.find:
+    paths: "{{ traefik_dynamic_config_dir }}"
+    patterns:
+      - "*.yml"
+      - "*.yaml"
+    file_type: file
+  register: traefik_fragment_present
+  when: traefik_enable_file_provider
+
+- name: Remove retired dynamic configuration fragments
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ traefik_fragment_present.files | default([]) }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  when: item.path | basename not in traefik_dynamic_configs
+  notify: Restart Traefik
+  register: traefik_retired_fragments
 
 - name: Look for the ACME storage file
   ansible.builtin.stat:
@@ -45,6 +81,90 @@
   when:
     - traefik_acme_email | length > 0
     - traefik_acme_storage_stat.stat.exists
+
+- name: Write the startup-check copy of the static configuration
+  ansible.builtin.template:
+    src: traefik.yml.j2
+    dest: "{{ traefik_check_static_file }}"
+    mode: "0600"
+  vars:
+    traefik_http_port: 0
+    traefik_https_port: 0
+    traefik_dashboard_port: 0
+    traefik_enable_file_provider: false
+    traefik_acme_storage: "{{ traefik_check_acme_storage }}"
+  changed_when: false
+
+- name: Write the startup-check copy with the file provider enabled
+  ansible.builtin.template:
+    src: traefik.yml.j2
+    dest: "{{ traefik_check_dynamic_file }}"
+    mode: "0600"
+  vars:
+    traefik_http_port: 0
+    traefik_https_port: 0
+    traefik_dashboard_port: 0
+    traefik_acme_email: ""
+  changed_when: false
+  when: traefik_enable_file_provider
+
+# Traefik v2 and later removed the v1 validate command, so the role
+# pre-activates with a startup probe instead: boot copies of the rendered
+# configuration (ephemeral entry point ports, throwaway ACME store, see vars)
+# for a few seconds and treat anything the real binary logs as an error --
+# unknown fields, dangling service or resolver references -- as a failed
+# change. The probe runs before the restart handler can flush, so a rejected
+# configuration never activates and the running service is left alone.
+- name: Check the rendered configuration with a Traefik startup probe
+  ansible.builtin.shell:
+    executable: /bin/bash
+    cmd: |
+      set -u
+      probe() {
+        local log rc bad
+        log="$(mktemp)"
+        timeout -s KILL 8 {{ traefik_install_dir }}/traefik --configFile="$1" >"$log" 2>&1
+        rc=$?
+        if [ "$rc" -ne 124 ] && [ "$rc" -ne 137 ]; then
+          # Dying before the timeout is a startup failure, except that a port
+          # already being taken is not a configuration error: a custom entry
+          # point from traefik_config_extras can collide with the running
+          # service, and Traefik rejected nothing in that case.
+          grep -qi 'address already in use' "$log" || { sed -n '1,20p' "$log"; rm -f "$log"; return 1; }
+        fi
+        # Error lines of the color-stripped log, minus the tolerated patterns.
+        bad="$(sed -e 's/\x1b\[[0-9;]*m//g' "$log" | grep -E 'ERR|level":"error' | grep -vE "$2" || true)"
+        rm -f "$log"
+        if [ -n "$bad" ]; then
+          echo "$bad"
+          return 1
+        fi
+        return 0
+      }
+      touch '{{ traefik_check_acme_storage }}'
+      chmod 600 '{{ traefik_check_acme_storage }}'
+      probe '{{ traefik_check_static_file }}' 'address already in use' || exit 1
+      {% if traefik_enable_file_provider %}
+      # The dynamic copy renders without the ACME resolver, so routers naming
+      # the role's letsencrypt resolver report it as nonexistent; that exact
+      # line is expected and filtered, a typo of the resolver name is not.
+      allow='Router uses a nonexistent certificate resolver certificateResolver=letsencrypt( |$)|address already in use'
+      probe '{{ traefik_check_dynamic_file }}' "$allow" || exit 1
+      {% endif %}
+  changed_when: false
+  when: >-
+    traefik_static_config is changed
+    or traefik_fragment_files.results | default([]) | selectattr('changed') | list | length > 0
+    or traefik_retired_fragments.results | default([]) | selectattr('changed') | list | length > 0
+
+- name: Install Traefik systemd unit
+  ansible.builtin.template:
+    src: traefik.service.j2
+    dest: "/etc/systemd/system/{{ traefik_service_name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Traefik
 
 - name: Enable and start Traefik
   ansible.builtin.systemd_service:

@@ -16,3 +16,11 @@ traefik_arch_map:
 traefik_arch: >-
   {{ traefik_arch_map[ansible_facts['architecture']]
      | default(ansible_facts['architecture']) }}
+
+# Scratch files for the pre-activation startup probe (see configure.yml).
+# Copies of the rendered static configuration, rewritten to bind every entry
+# point to an ephemeral port so the probe never disturbs the running service,
+# plus a throwaway ACME store so the probe can never touch the real one.
+traefik_check_static_file: /tmp/traefik-role-check-static.yml
+traefik_check_dynamic_file: /tmp/traefik-role-check-dynamic.yml
+traefik_check_acme_storage: /tmp/traefik-role-check-acme.json
