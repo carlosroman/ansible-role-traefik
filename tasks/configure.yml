@@ -114,7 +114,10 @@
 # for a few seconds and treat anything the real binary logs as an error --
 # unknown fields, dangling service or resolver references -- as a failed
 # change. The probe runs before the restart handler can flush, so a rejected
-# configuration never activates and the running service is left alone.
+# configuration never activates and the running service is left alone. It
+# also runs whenever the binary changed (or is installed for the first time):
+# the new binary must validate the current configuration before it takes the
+# service over, exactly like a configuration change.
 - name: Check the rendered configuration with a Traefik startup probe
   ansible.builtin.shell:
     executable: /bin/bash
@@ -152,10 +155,12 @@
       probe '{{ traefik_check_dynamic_file }}' "$allow" || exit 1
       {% endif %}
   changed_when: false
+  register: traefik_startup_probe
   when: >-
     traefik_static_config is changed
     or traefik_fragment_files.results | default([]) | selectattr('changed') | list | length > 0
     or traefik_retired_fragments.results | default([]) | selectattr('changed') | list | length > 0
+    or traefik_install_needed | default(false) | bool
 
 - name: Install Traefik systemd unit
   ansible.builtin.template:

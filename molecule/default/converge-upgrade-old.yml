@@ -1,0 +1,38 @@
+#SPDX-License-Identifier: MIT-0
+---
+# First half of the pin-flip path (make test/upgrade): install the v3.7.17
+# pin. The companion converge-upgrade-new.yml re-converges the same
+# instance with v3.7.19 and proves the in-place upgrade: startup probe
+# against the new binary and exactly one restart. Standalone this playbook
+# is idempotent (present + matching pin changes nothing).
+- name: Converge (older pin before the upgrade)
+  hosts: all
+
+  roles:
+    - role: carlosroman.traefik
+      vars:
+        traefik_version: v3.7.17
+
+  post_tasks:
+    - name: Check Traefik service state
+      ansible.builtin.systemd_service:
+        name: traefik
+      register: upgrade_old_service
+      changed_when: false
+
+    - name: Read the installed Traefik version
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/traefik
+          - version
+      check_mode: false
+      register: upgrade_old_version
+      changed_when: false
+
+    - name: Assert Traefik serves the v3.7.17 pin
+      ansible.builtin.assert:
+        that:
+          - upgrade_old_service.status.UnitFileState == "enabled"
+          - upgrade_old_service.status.ActiveState == "active"
+          - "'3.7.17' in (upgrade_old_version.stdout ~ upgrade_old_version.stderr)"
+        fail_msg: the v3.7.17 pin did not install cleanly

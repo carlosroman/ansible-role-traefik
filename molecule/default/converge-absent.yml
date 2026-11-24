@@ -1,0 +1,92 @@
+#SPDX-License-Identifier: MIT-0
+---
+# Converge playbook variant exercising traefik_state=absent, the apt remove
+# analogue (see the README Version management section). Designed for
+# make test/absent: the default converge installs Traefik, this playbook
+# then removes it, removes it a second time (the repeat must report
+# changed=0), and the default converge installs it again. The asserts also
+# hold standalone against a never-installed instance and in check mode, so
+# `MOLECULE_PLAYBOOK=converge-absent.yml molecule test` covers the fresh
+# case too.
+- name: Converge (state absent)
+  hosts: all
+
+  roles:
+    - role: carlosroman.traefik
+      vars:
+        traefik_state: absent
+
+  post_tasks:
+    - name: Check the Traefik binary
+      ansible.builtin.stat:
+        path: /usr/local/bin/traefik
+      register: absent_binary
+
+    - name: Check the Traefik systemd unit file
+      ansible.builtin.stat:
+        path: /etc/systemd/system/traefik.service
+      register: absent_unit
+
+    - name: Assert the binary and the unit file are gone
+      ansible.builtin.assert:
+        that:
+          - ansible_check_mode or not absent_binary.stat.exists
+          - ansible_check_mode or not absent_unit.stat.exists
+        fail_msg: >-
+          absent left the binary (exists={{ absent_binary.stat.exists }}) or
+          the unit file (exists={{ absent_unit.stat.exists }}) behind
+
+    # Read-only, so it runs even during dry runs: the assert below must key
+    # off the real user's presence in check mode too (a skipped command's
+    # registered rc would not).
+    - name: Look up the Traefik service user
+      ansible.builtin.command:
+        cmd: getent passwd traefik
+      check_mode: false
+      register: absent_user
+      changed_when: false
+      failed_when: false
+
+    - name: Check the configuration and data directories
+      ansible.builtin.stat:
+        path: "{{ item }}"
+      loop:
+        - /etc/traefik
+        - /var/lib/traefik
+      register: absent_dirs
+
+    # apt remove, not purge: where an install had happened (the service
+    # user is the marker), the user and both directories -- acme.json
+    # private keys included -- must have survived the removal.
+    - name: Assert the configuration and data directories survived
+      ansible.builtin.assert:
+        that:
+          - absent_dirs.results[0].stat.exists
+          - absent_dirs.results[1].stat.exists
+        fail_msg: >-
+          absent removed /etc/traefik or /var/lib/traefik; apt remove
+          semantics must keep them, acme.json private keys included
+      when: absent_user.rc == 0
+
+    - name: Check the service is not running
+      ansible.builtin.command:
+        cmd: systemctl is-active --quiet traefik
+      register: absent_active
+      changed_when: false
+      failed_when: false
+
+    - name: Check the service is not enabled
+      ansible.builtin.command:
+        cmd: systemctl is-enabled --quiet traefik
+      register: absent_enabled
+      changed_when: false
+      failed_when: false
+
+    - name: Assert the service is stopped and disabled
+      ansible.builtin.assert:
+        that:
+          - ansible_check_mode or absent_active.rc != 0
+          - ansible_check_mode or absent_enabled.rc != 0
+        fail_msg: >-
+          the Traefik service is still active or enabled
+          (active rc={{ absent_active.rc }}, enabled rc={{ absent_enabled.rc }})

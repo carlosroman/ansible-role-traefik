@@ -1,0 +1,101 @@
+#SPDX-License-Identifier: MIT-0
+---
+# Converge playbook variant exercising the apt-like version management
+# interface (see the README Version management section): the reject cases
+# for traefik_state, then state=latest through to idempotence -- the second
+# molecule converge must report changed=0 while still resolving the newest
+# release. Run with:
+# make test/state
+- name: Reject invalid version management inputs
+  hosts: all
+
+  tasks:
+    - name: Attempt traefik_state latest combined with a pinned version
+      block:
+        - name: Include the Traefik role with latest and a version pin
+          ansible.builtin.include_role:
+            name: carlosroman.traefik
+          vars:
+            traefik_state: latest
+            traefik_version: v3.7.18
+
+        - name: Fail because the role accepted the combination
+          ansible.builtin.assert:
+            that: false
+            fail_msg: traefik_state=latest with traefik_version set was accepted
+
+      rescue:
+        - name: Assert the rejection named both conflicting variables
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Check traefik_version against traefik_state latest'
+              - "'traefik_state' in rejection_msg"
+              - "'traefik_version' in rejection_msg"
+            fail_msg: >-
+              the role rejected for the wrong reason: {{ rejection_msg }}
+          vars:
+            rejection_msg: "{{ ansible_failed_result.msg | default('') }}"
+
+    - name: Attempt an unsupported traefik_state value
+      block:
+        - name: Include the Traefik role with a bogus state
+          ansible.builtin.include_role:
+            name: carlosroman.traefik
+          vars:
+            traefik_state: purge
+
+        - name: Fail because the role accepted the bogus state
+          ansible.builtin.assert:
+            that: false
+            fail_msg: traefik_state=purge was accepted
+
+      rescue:
+        - name: Assert the rejection named traefik_state and the allowed values
+          ansible.builtin.assert:
+            that:
+              - ansible_failed_task.name == 'Check that traefik_state is a supported value'
+              - "'traefik_state' in rejection_msg"
+              - "'purge' in rejection_msg"
+              - "'present' in rejection_msg"
+              - "'latest' in rejection_msg"
+              - "'absent' in rejection_msg"
+            fail_msg: >-
+              the role rejected for the wrong reason: {{ rejection_msg }}
+          vars:
+            rejection_msg: "{{ ansible_failed_result.msg | default('') }}"
+
+- name: Converge (state latest)
+  hosts: all
+
+  roles:
+    - role: carlosroman.traefik
+      vars:
+        traefik_state: latest
+
+  post_tasks:
+    - name: Check Traefik service state
+      ansible.builtin.systemd_service:
+        name: traefik
+      register: latest_service
+      changed_when: false
+
+    - name: Read the installed Traefik version
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/traefik
+          - version
+      check_mode: false
+      register: latest_probe_output
+      changed_when: false
+
+    - name: Assert Traefik runs the newest release
+      ansible.builtin.assert:
+        that:
+          - latest_service.status.UnitFileState == "enabled"
+          - latest_service.status.ActiveState == "active"
+          - traefik_release_tag is match('^v[0-9]+\\.[0-9]+\\.[0-9]+$')
+          - (traefik_release_tag | regex_replace('^v', ''))
+            in (latest_probe_output.stdout ~ latest_probe_output.stderr)
+        fail_msg: >-
+          state=latest did not converge (tag={{ traefik_release_tag }},
+          output={{ latest_probe_output.stdout }}{{ latest_probe_output.stderr }})

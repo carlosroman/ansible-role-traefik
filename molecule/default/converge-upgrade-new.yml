@@ -1,0 +1,50 @@
+#SPDX-License-Identifier: MIT-0
+---
+# Second half of the pin-flip path (make test/upgrade): the same instance
+# now pins v3.7.19 while v3.7.17 is running. The role must replace the
+# binary, validate the current configuration against the NEW binary with
+# the startup probe before anything restarts, and end with the service
+# active on v3.7.19 restarted exactly once -- the 'Restart Traefik' handler
+# must appear exactly once in the molecule log of this converge.
+- name: Converge (newer pin after the upgrade)
+  hosts: all
+
+  roles:
+    - role: carlosroman.traefik
+      vars:
+        traefik_version: v3.7.19
+
+  post_tasks:
+    - name: Check Traefik service state
+      ansible.builtin.systemd_service:
+        name: traefik
+      register: upgrade_new_service
+      changed_when: false
+
+    - name: Read the installed Traefik version
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/traefik
+          - version
+      check_mode: false
+      register: upgrade_new_version
+      changed_when: false
+
+    - name: Assert Traefik now serves the v3.7.19 pin
+      ansible.builtin.assert:
+        that:
+          - upgrade_new_service.status.UnitFileState == "enabled"
+          - upgrade_new_service.status.ActiveState == "active"
+          - "'3.7.19' in (upgrade_new_version.stdout ~ upgrade_new_version.stderr)"
+          - "'3.7.17' not in (upgrade_new_version.stdout ~ upgrade_new_version.stderr)"
+        fail_msg: >-
+          the pin flip did not replace the binary
+          (output={{ upgrade_new_version.stdout }}{{ upgrade_new_version.stderr }})
+
+    # The probe task is registered inside the role; it must have run
+    # against the replaced binary in this very converge.
+    - name: Assert the startup probe validated the new binary
+      ansible.builtin.assert:
+        that:
+          - traefik_startup_probe is not skipped
+        fail_msg: the startup probe did not run on the version-change converge

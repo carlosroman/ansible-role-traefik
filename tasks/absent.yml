@@ -1,0 +1,36 @@
+#SPDX-License-Identifier: MIT-0
+---
+# apt remove semantics for traefik_state=absent: stop and disable the
+# service, then delete the systemd unit and the binary. The service user
+# and group, traefik_config_dir and traefik_data_dir -- acme.json private
+# keys included -- are kept so a re-install reuses the ACME account. Every
+# task keys off the current state and never asks systemd about a unit that
+# is not there, so a host where Traefik was never installed converges
+# green and unchanged, in check mode included.
+- name: Check for the Traefik systemd unit file
+  ansible.builtin.stat:
+    path: "/etc/systemd/system/{{ traefik_service_name }}.service"
+  register: traefik_unit_stat
+
+- name: Stop and disable the Traefik service
+  ansible.builtin.systemd_service:
+    name: "{{ traefik_service_name }}"
+    state: stopped
+    enabled: false
+  when: traefik_unit_stat.stat.exists
+
+- name: Remove the Traefik systemd unit file
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ traefik_service_name }}.service"
+    state: absent
+  register: traefik_unit_removed
+
+- name: Reload systemd after removing the unit
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: traefik_unit_removed is changed
+
+- name: Remove the Traefik binary
+  ansible.builtin.file:
+    path: "{{ traefik_install_dir }}/traefik"
+    state: absent

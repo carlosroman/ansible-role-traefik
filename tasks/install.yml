@@ -33,13 +33,51 @@
       group: "{{ traefik_group }}"
       mode: "0700"
 
+# apt-like version convergence decides against the version the target
+# actually reports, so read it before downloading anything. The version
+# query is read-only and safe during dry runs; a binary that exists but
+# cannot report its version is treated as absent (the install below
+# replaces it) instead of failing the run.
+- name: Check for the installed Traefik binary
+  ansible.builtin.stat:
+    path: "{{ traefik_install_dir }}/traefik"
+  register: traefik_binary_stat
+
+- name: Read the installed Traefik version
+  ansible.builtin.command:
+    cmd: "{{ traefik_install_dir }}/traefik version"
+  check_mode: false
+  changed_when: false
+  failed_when: false
+  register: traefik_installed_version_check
+  when: traefik_binary_stat.stat.exists
+
+- name: Set the installed Traefik version fact
+  ansible.builtin.set_fact:
+    traefik_installed_version: >-
+      {{ ((traefik_installed_version_check.stdout | default('')) ~ ' ' ~
+          (traefik_installed_version_check.stderr | default('')))
+         | regex_search('Version:\s*(v?[0-9][^\s]*)', '\1') | default([''], true) | first }}
+
+# Release resolution runs on the controller, not on the target: targets
+# need no outbound access to api.github.com and no Python HTTP packages
+# for it, and ansible-core's uri talks urllib so the controller needs no
+# requests either. delegate_to without run_once: version pins come from
+# host_vars, so a play may mix pinned and unpinned hosts, while run_once
+# would evaluate the condition against the first host only. An unpinned
+# host resolves the newest release on every converge (GitHub rate limits;
+# see the Version management section of the README); a pinned version
+# never calls the API.
 - name: Query GitHub for the latest Traefik release
   ansible.builtin.uri:
     url: "https://api.github.com/repos/{{ traefik_github_owner }}/{{ traefik_github_repo }}/releases/latest"
     headers:
       Accept: application/vnd.github+json
-  register: traefik_latest_release
+  delegate_to: localhost
+  become: false
+  check_mode: false
   changed_when: false
+  register: traefik_latest_release
   when: traefik_version | length == 0
 
 - name: Set Traefik release facts
@@ -50,32 +88,60 @@
                else traefik_latest_release.json.tag_name) }}
     traefik_releases_url: "https://github.com/{{ traefik_github_owner }}/{{ traefik_github_repo }}/releases/download"
 
+# The apt-like install decision (README, Version management): a present
+# host with an empty version keeps whatever binary it already has, because
+# apt 'present' never upgrades. Otherwise the installed version must equal
+# the wanted tag exactly -- a mismatch installs, downgrades included, and a
+# missing binary always installs. Traefik reports 'v3.7.18' up to v3.7 but
+# '3.8.0' from v3.8, so both sides lose the leading v before comparing.
+- name: Set the Traefik install decision fact
+  ansible.builtin.set_fact:
+    traefik_install_needed: >-
+      {{ false
+         if traefik_state == 'present' and traefik_version | length == 0
+              and traefik_binary_stat.stat.exists
+         else traefik_installed_version | length == 0
+              or traefik_installed_version | regex_replace('^v', '')
+              != traefik_release_tag | regex_replace('^v', '') }}
+
+# Everything below is the download-and-install block, skipped wholesale
+# when the host already runs the wanted version: converged installs hit no
+# network for the binary and report no change. Checksum verification of
+# the release archive is unchanged. Replacing the binary notifies the
+# restart handler (a first install has nothing running to restart; see the
+# handler), and the startup probe in configure.yml validates the current
+# configuration against the new binary before the restart takes over.
 - name: Set Traefik archive file name facts
   ansible.builtin.set_fact:
     traefik_archive_name: "traefik_{{ traefik_release_tag }}_linux_{{ traefik_arch }}.tar.gz"
     traefik_checksums_name: "traefik_{{ traefik_release_tag }}_checksums.txt"
+  when: traefik_install_needed | bool
 
 - name: Set Traefik download URL facts
   ansible.builtin.set_fact:
     traefik_archive_url: "{{ traefik_releases_url }}/{{ traefik_release_tag }}/{{ traefik_archive_name }}"
     traefik_checksums_url: "{{ traefik_releases_url }}/{{ traefik_release_tag }}/{{ traefik_checksums_name }}"
+  when: traefik_install_needed | bool
 
 - name: Download Traefik checksums file
   ansible.builtin.get_url:
     url: "{{ traefik_checksums_url }}"
     dest: "/tmp/{{ traefik_checksums_name }}"
     mode: "0644"
+  when: traefik_install_needed | bool
 
 - name: Read Traefik checksums file
   ansible.builtin.slurp:
     src: "/tmp/{{ traefik_checksums_name }}"
   register: traefik_checksums_raw
+  when: traefik_install_needed | bool
 
 - name: Set Traefik binary checksum fact
   ansible.builtin.set_fact:
     traefik_binary_sha256: >-
       {{ traefik_checksums_raw.content | b64decode
          | regex_search('([a-f0-9]{64})\s+' ~ traefik_archive_name, '\1') | first }}
+  when: traefik_install_needed | bool
 
 - name: Download Traefik release archive
   ansible.builtin.get_url:
@@ -83,6 +149,7 @@
     dest: "/tmp/{{ traefik_archive_name }}"
     checksum: "sha256:{{ traefik_binary_sha256 }}"
     mode: "0644"
+  when: traefik_install_needed | bool
 
 - name: Extract Traefik binary
   ansible.builtin.unarchive:
@@ -92,3 +159,5 @@
     owner: root
     group: root
     mode: "0755"
+  notify: Restart Traefik
+  when: traefik_install_needed | bool

@@ -1,7 +1,26 @@
 #SPDX-License-Identifier: MIT-0
 ---
-# Traefik version to install (e.g. "v3.7.19" or "3.7.19").
-# Leave empty to install the latest release, resolved via the GitHub API.
+# Desired state of the Traefik installation, mirroring ansible.builtin.apt:
+#   present -- keep exactly the traefik_version pin installed, downgrading
+#     when the installed binary reports another version; with an empty
+#     traefik_version the first install resolves and installs the latest
+#     release and an installed binary is then never touched again (apt
+#     present does not upgrade).
+#   latest -- converge to the newest release, resolved via the GitHub API
+#     from the controller on every converge; a replaced binary restarts the
+#     service. Cannot be combined with traefik_version.
+#   absent -- stop and disable the service and remove the systemd unit and
+#     the binary (like apt remove, not purge): the service user and group,
+#     traefik_config_dir and traefik_data_dir, acme.json private keys
+#     included, survive for a future re-install.
+traefik_state: present
+
+# Traefik version to install (e.g. "v3.7.19" or "3.7.19"), the exact-pin
+# mechanism: traefik_state=present converges to it, downgrades included.
+# Empty with traefik_state=present means the latest release is resolved at
+# the first install and never re-resolved while a binary exists. Empty with
+# traefik_state=latest tracks the newest release every converge. Setting it
+# together with traefik_state=latest is an error.
 traefik_version: ""
 
 # GitHub location of the published Traefik release binaries.

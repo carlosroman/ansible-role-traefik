@@ -13,13 +13,28 @@
       register: traefik_service
       changed_when: false
 
+    - name: Read the installed Traefik version
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/traefik
+          - version
+      check_mode: false
+      register: latest_version_output
+      changed_when: false
+
+    # A checksum fact only exists on the converge that downloaded the
+    # release; a converged instance must not re-download (present + empty
+    # never touches an installed binary), so the running version matching
+    # the freshly resolved tag is the assertion every converge can make.
     - name: Assert Traefik is installed from the latest release
       ansible.builtin.assert:
         that:
           - traefik_service.status.UnitFileState == "enabled"
           - traefik_service.status.ActiveState == "active"
           - traefik_release_tag is match('^v[0-9]+\\.[0-9]+\\.[0-9]+$')
-          - traefik_binary_sha256 is match('^[a-f0-9]{64}$')
+          - traefik_binary_sha256 is not defined or traefik_binary_sha256 is match('^[a-f0-9]{64}$')
+          - (traefik_release_tag | regex_replace('^v', ''))
+            in (latest_version_output.stdout ~ latest_version_output.stderr)
         fail_msg: >-
           Latest resolution failed (tag={{ traefik_release_tag }},
-          sha={{ traefik_binary_sha256 }})
+          sha={{ traefik_binary_sha256 | default('not downloaded on this converge') }})

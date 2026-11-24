@@ -16,6 +16,9 @@ All driven by `make`:
 | `make test` | Runs `molecule test` (single distro, defaults to `ubuntu2404`) |
 | `make test/acme` | Tests the ACME resolver opt-in (`converge-acme.yml`) |
 | `make test/acme/ubuntu-2604` | That opt-in scenario against Ubuntu 26.04 |
+| `make test/state` | Tests `traefik_state` semantics: the reject cases and `latest` to idempotence (`converge-state.yml`) |
+| `make test/upgrade` | Pin-flip path on one instance: v3.7.17 converge, then v3.7.19, then back to v3.7.17 to cover downgrades too (`converge-upgrade-old.yml` + `converge-upgrade-new.yml`) |
+| `make test/absent` | apt-remove semantics on one instance: install, absent, absent (changed=0), reinstall (`converge-absent.yml`) |
 | `make test/ubuntu-2404` | Test against a specific distro |
 | `make test/all` | Test against all 7 distros sequentially |
 
@@ -28,6 +31,13 @@ Override distro without a make target: `MOLECULE_DISTRO=debian12 molecule test`.
 - **Driver**: Docker (uses `geerlingguy/docker-${MOLECULE_DISTRO}-ansible:latest` images)
 - **Config**: `molecule/default/molecule.yml`
 - **Converge playbook**: `molecule/default/converge.yml` — references the role by its Galaxy name
+- **Role resolution**: molecule resolves the role by its Galaxy name, and a
+  stale installed copy under `~/.ansible/roles/` silently shadows the working
+  tree (you would test HEAD, not your edits). Export an `ANSIBLE_ROLES_PATH`
+  holding a `carlosroman.traefik` symlink to this repo before running molecule
+  by hand, e.g.
+  `mkdir -p /tmp/roles/carlosroman && ln -sfn "$PWD" /tmp/roles/carlosroman/traefik && ANSIBLE_ROLES_PATH=/tmp/roles make test`.
+  CI checkouts are unaffected.
 - Requires Docker running locally. The devcontainer includes docker-in-docker.
 
 ## CI workflow (`.github/workflows/ci.yml`)

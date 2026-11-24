@@ -10,10 +10,13 @@ service user, the static configuration file, and a systemd unit.
 
 ## Requirements
 
-None. The target must be able to reach `github.com` and `api.github.com` to
-download the release archive and checksums. When `traefik_version` is empty the
-latest release is resolved via the GitHub API, which is rate-limited for
-unauthenticated requests — pin `traefik_version` to avoid API failures.
+None. The target must be able to reach `github.com` to download the release
+archive and checksums. The latest-release lookup queries `api.github.com`
+from the Ansible controller, not from the target, so targets need no
+outbound access to `api.github.com`. Unauthenticated API requests are
+rate-limited: while `traefik_version` is empty the newest release is
+resolved on every converge, so pin `traefik_version` to keep API failures
+and network use out of converged runs.
 
 ## Role Variables
 
@@ -21,7 +24,8 @@ Available variables are listed below, along with their default values (see `defa
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `traefik_version` | `""` | Version to install (e.g. `v3.7.19`). Empty means the latest release, resolved via the GitHub API. |
+| `traefik_state` | `present` | Desired installation state, mirroring `ansible.builtin.apt`: `present`, `latest` or `absent`; see Version management below. |
+| `traefik_version` | `""` | Exact version to install (e.g. `v3.7.19`). Empty means the role resolves the latest release via the GitHub API; what it then does with the answer depends on `traefik_state`. |
 | `traefik_github_owner` | `traefik` | GitHub owner of the release binaries. |
 | `traefik_github_repo` | `traefik` | GitHub repository of the release binaries. |
 | `traefik_install_dir` | `/usr/local/bin` | Directory the `traefik` binary is installed into. |
@@ -67,6 +71,39 @@ Enable the HTTPS entrypoint and the dashboard:
             traefik_version: v3.7.19
             traefik_enable_https: true
             traefik_enable_dashboard: true
+
+Version management
+------------------
+
+`traefik_state` gives the role the version interface of
+`ansible.builtin.apt` for the binary; `traefik_version` stays the exact-pin
+mechanism.
+
+| `traefik_state` | `traefik_version` | Behaviour |
+|-----------------|-------------------|-----------|
+| `present` | set | Ensure exactly that version. If the installed binary reports another version, or is missing, the pinned one is installed — including downgrades, like apt. When it already matches, nothing is downloaded. |
+| `present` | empty | A missing binary gets the latest release; a host with an installed binary is never touched version-wise (apt's `present` does not upgrade). |
+| `latest` | empty | Resolve the newest release on every converge, install it whenever it differs from the installed version, and restart Traefik when the binary is replaced. |
+| `latest` | set | Fails: the two are mutually exclusive, the same error `ansible.builtin.apt` raises. |
+| `absent` | ignored | Stop and disable the service, remove the systemd unit and the binary. |
+
+The latest-release resolution queries the GitHub API from the controller on
+every converge, so an unpinned run is subject to the unauthenticated rate
+limit; a pinned `traefik_state: present` version never calls the API, and a
+host already running the wanted version downloads nothing at all. Replacing
+the binary notifies the restart handler, and the startup probe validates the
+current configuration against the new binary before the restart activates
+it; a first install is started exactly once by the enable-and-start task.
+Should the probe reject the new binary, note that the replacement on disk
+has already happened: the running service keeps the previous process, but a
+host reboot would activate the rejected pairing. Recover by fixing the
+configuration or moving `traefik_version` back, not by retrying the converge.
+
+`absent` is apt `remove`, not `purge`: the service user and group,
+`traefik_config_dir` and `traefik_data_dir` — `acme.json` with its private
+keys included — deliberately survive so a re-install reuses the existing
+ACME account. An absent converge on a host that never had Traefik installed
+changes nothing.
 
 TLS certificates (ACME)
 -----------------------

@@ -1,10 +1,62 @@
 #SPDX-License-Identifier: MIT-0
 ---
-- name: Run setup tasks
-  ansible.builtin.include_tasks: setup-{{ ansible_facts.os_family }}.yml
+# apt-like guard rails run first: an unsupported traefik_state, or the
+# mutually exclusive traefik_state=latest plus traefik_version combination,
+# must fail the run before the role touches packages, users, files or
+# services, on any host and in check mode alike.
+- name: Check that traefik_state is a supported value
+  ansible.builtin.assert:
+    that:
+      - traefik_state in ['present', 'latest', 'absent']
+    fail_msg: >-
+      traefik_state must be one of present, latest or absent,
+      got '{{ traefik_state }}'.
 
-- name: Include Traefik installation tasks
-  ansible.builtin.import_tasks: install.yml
+- name: Check traefik_version against traefik_state latest
+  ansible.builtin.assert:
+    that:
+      - traefik_version | length == 0
+    fail_msg: >-
+      traefik_version ('{{ traefik_version }}') cannot be used with
+      traefik_state=latest: set traefik_state to present to install exactly
+      '{{ traefik_version }}', or leave traefik_version empty to track the
+      newest release.
+  when: traefik_state == 'latest'
 
-- name: Include Traefik configuration tasks
-  ansible.builtin.import_tasks: configure.yml
+# The release-download URLs are built from the tag verbatim, and GitHub
+# release tags are lowercase-v or bare digits only; a capital V or a word
+# like 'latest' would 404 on every converge, so name the expected shape
+# here instead. state=absent ignores traefik_version entirely and must
+# stay lenient.
+- name: Check that traefik_version is a release version
+  ansible.builtin.assert:
+    that:
+      - traefik_version is match('^v?[0-9]')
+    fail_msg: >-
+      traefik_version ('{{ traefik_version }}') must start with a digit or
+      a lowercase 'v' followed by a digit, e.g. v3.7.19 or 3.7.19.
+  when:
+    - traefik_version | length > 0
+    - traefik_state != 'absent'
+
+# state=absent is apt remove, not purge: the service unit and the binary go
+# away, the service user and group, traefik_config_dir and traefik_data_dir
+# (including the acme.json private keys) deliberately survive. The
+# configuration tasks are mutually exclusive with removal: rewriting a
+# config for a stopped service whose unit references a deleted binary would
+# be wrong.
+- name: Remove Traefik
+  ansible.builtin.import_tasks: absent.yml
+  when: traefik_state == 'absent'
+
+- name: Install and configure Traefik
+  when: traefik_state != 'absent'
+  block:
+    - name: Run setup tasks
+      ansible.builtin.include_tasks: setup-{{ ansible_facts.os_family }}.yml
+
+    - name: Include Traefik installation tasks
+      ansible.builtin.import_tasks: install.yml
+
+    - name: Include Traefik configuration tasks
+      ansible.builtin.import_tasks: configure.yml
